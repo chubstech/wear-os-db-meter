@@ -11,33 +11,31 @@ import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+
+import java.io.DataOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.time.Instant;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.support.wearable.activity.WearableActivity;
 import android.util.Log;
+import android.view.WindowManager;
 import android.widget.TextView;
 
-import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.fragment.app.FragmentActivity;
 import androidx.wear.ambient.AmbientModeSupport;
 
-import java.lang.ref.WeakReference;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.TimeUnit;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-public class MainActivity extends FragmentActivity implements AmbientModeSupport.AmbientCallbackProvider {
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+
+public class MainActivity extends FragmentActivity {
     static final private double EMA_FILTER = 0.6;
     private static double mEMA = 0.0;
-    final Handler mHandler = new Handler();
     TextView mStatusView, mStatusAvgView;
     MediaRecorder mRecorder;
-    private List<Double> valuesAvg = new ArrayList<>();
-    private long timestamp = System.currentTimeMillis() / 100L;
-    private long lastTimestamp = System.currentTimeMillis() / 100L;
-    private ConstraintLayout constraintLayout;
 
     private static final String TAG = "MainActivity";
 
@@ -57,17 +55,10 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
         super.onCreate(savedInstanceState);
 
 
-        setContentView(R.layout.activity_main);
-
-        mAmbientController = AmbientModeSupport.attach(this);
-
-        mAmbientUpdateAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
-
         /*
          * Create a PendingIntent which we'll give to the AlarmManager to send ambient mode updates
          * on an interval which we've define.
          */
-        Intent ambientUpdateIntent = new Intent(AMBIENT_UPDATE_ACTION);
 
         /*
          * Retrieves a PendingIntent that will perform a broadcast. You could also use getActivity()
@@ -81,39 +72,20 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
          * Otherwise, it is easy for the AlarmManager launch Intent to open a new activity
          * every time the Alarm is triggered rather than reusing this Activity.
          */
-        mAmbientUpdatePendingIntent =
-                PendingIntent.getBroadcast(
-                        this, 0, ambientUpdateIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-
-        /*
-         * An anonymous broadcast receiver which will receive ambient update requests and trigger
-         * display refresh.
-         */
-        mAmbientUpdateBroadcastReceiver =
-                new BroadcastReceiver() {
-                    @Override
-                    public void onReceive(Context context, Intent intent) {
-                        refreshDisplayAndSetNextUpdate();
-                    }
-                };
-
-
 
 
         setContentView(R.layout.activity_main);
-        constraintLayout = findViewById(R.id.background);
         mStatusView = findViewById(R.id.dbText);
         mStatusAvgView = findViewById(R.id.time);
+//        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     public void onResume() {
         super.onResume();
         startRecorder();
 
-        Log.d(TAG, "onResume()");
 
         IntentFilter filter = new IntentFilter(AMBIENT_UPDATE_ACTION);
-        registerReceiver(mAmbientUpdateBroadcastReceiver, filter);
 
         refreshDisplayAndSetNextUpdate();
     }
@@ -121,12 +93,9 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
     public void onPause() {
         super.onPause();
         stopRecorder();
-        Log.d(TAG, "onPause()");
 
-        unregisterReceiver(mAmbientUpdateBroadcastReceiver);
 
         mActiveModeUpdateHandler.removeMessages(MSG_UPDATE_SCREEN);
-        mAmbientUpdateAlarmManager.cancel(mAmbientUpdatePendingIntent);
     }
 
     public void startRecorder() {
@@ -180,7 +149,6 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
         SharedPreferences sp = this.getSharedPreferences("device-base", MODE_PRIVATE);
         double amp = (double) sp.getFloat("amplitude", 0);
         double mEMAValue = EMA_FILTER * amplitude + (1.0 - EMA_FILTER) * mEMA;
-        Log.d("db", Double.toString(amp));
         //Assuming that the minimum reference pressure is 0.000085 Pascal (on most phones) is equal to 0 db
         // samsung S9 0.000028251
         return 20 * (float) Math.log10((mEMAValue/51805.5336)/ 0.000028251);
@@ -222,33 +190,6 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
 
 
 
-    private AmbientModeSupport.AmbientController mAmbientController;
-
-    /** If the display is low-bit in ambient mode. i.e. it requires anti-aliased fonts. */
-    boolean mIsLowBitAmbient;
-
-    /**
-     * If the display requires burn-in protection in ambient mode, rendered pixels need to be
-     * intermittently offset to avoid screen burn-in.
-     */
-    boolean mDoBurnInProtection;
-
-    private final SimpleDateFormat sDateFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
-
-    private volatile int mDrawCount = 0;
-
-    /**
-     * Since the handler (used in active mode) can't wake up the processor when the device is in
-     * ambient mode and undocked, we use an Alarm to cover ambient mode updates when we need them
-     * more frequently than every minute. Remember, if getting updates once a minute in ambient mode
-     * is enough, you can do away with the Alarm code and just rely on the onUpdateAmbient()
-     * callback.
-     */
-    private AlarmManager mAmbientUpdateAlarmManager;
-
-    private PendingIntent mAmbientUpdatePendingIntent;
-    private BroadcastReceiver mAmbientUpdateBroadcastReceiver;
-
     /**
      * This custom handler is used for updates in "Active" mode. We use a separate static class to
      * help us avoid memory leaks.
@@ -262,6 +203,10 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
     private double lastReading = 0;
     private boolean vibrating = false;
     private long count = 0;
+    ArrayList<Observation> obs = new ArrayList<>();
+
+    String user_id = "BBNN21";
+
     private void refreshDisplayAndSetNextUpdate() {
 
         loadDataAndUpdateScreen();
@@ -280,20 +225,10 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
             }
         }
 
-        if (mAmbientController.isAmbient()) {
-            /* Calculate next trigger time (based on state). */
-            long delayMs = AMBIENT_INTERVAL_MS - (timeMs % AMBIENT_INTERVAL_MS)  + extraTime;
-            long triggerTimeMs = timeMs + delayMs;
-
-            mAmbientUpdateAlarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP, triggerTimeMs, mAmbientUpdatePendingIntent);
-        } else {
-            /* Calculate next trigger time (based on state). */
-            long delayMs = ACTIVE_INTERVAL_MS - (timeMs % ACTIVE_INTERVAL_MS) + extraTime;
-
-            mActiveModeUpdateHandler.removeMessages(MSG_UPDATE_SCREEN);
-            mActiveModeUpdateHandler.sendEmptyMessageDelayed(MSG_UPDATE_SCREEN, delayMs);
-        }
+        /* Calculate next trigger time (based on state). */
+        long delayMs = ACTIVE_INTERVAL_MS - (timeMs % ACTIVE_INTERVAL_MS) + extraTime;
+        mActiveModeUpdateHandler.removeMessages(MSG_UPDATE_SCREEN);
+        mActiveModeUpdateHandler.sendEmptyMessageDelayed(MSG_UPDATE_SCREEN, delayMs);
 
         double amplitude = mRecorder.getMaxAmplitude();
         if(amplitude > 0 && amplitude < 1000000) {
@@ -302,9 +237,77 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
             if(Math.abs(dbl - lastReading) < 2) return;
             lastReading = dbl;
             long reading = Math.round(dbl);
+            long ut1 = Instant.now().getEpochSecond();
+            Observation newObs = new Observation(ut1, (int) reading);
+            obs.add(newObs);
+            System.out.println(obs.size());
+            if(obs.size() > 256) {
+                ArrayList<Observation> tmpObs = obs;
+                obs = new ArrayList<>();
+                sendPost(tmpObs);
+            }
             mStatusView.setText(reading + "");
 
         }
+    }
+
+    JSONObject getObs(Observation toSend){
+        JSONObject obs = new JSONObject();
+        try {
+            obs.put("time_obs", toSend.getTimeObs());
+            obs.put("db_reading", toSend.getDbReading());
+        } catch(Exception e) {
+
+        }
+        return obs;
+    }
+
+    public JSONArray bundleObs(ArrayList<Observation> dataToSend){
+
+        JSONArray observations = new JSONArray();
+        for(Observation obs : dataToSend) {
+            observations.put(getObs(obs));
+        }
+
+        return observations;
+    }
+
+    public void sendPost(final ArrayList<Observation> dataToSend) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("https://noise-wearable.herokuapp.com/api/noise_observation");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json;charset=UTF-8");
+                    conn.setRequestProperty("Accept","application/json");
+                    conn.setDoOutput(true);
+                    conn.setDoInput(true);
+
+                    JSONObject jsonParam = new JSONObject();
+                    jsonParam.put("user_id", user_id);
+                    jsonParam.put("data", bundleObs(dataToSend));
+
+                    Log.i("JSON", jsonParam.toString());
+                    DataOutputStream os = new DataOutputStream(conn.getOutputStream());
+                    //os.writeBytes(URLEncoder.encode(jsonParam.toString(), "UTF-8"));
+                    os.writeBytes(jsonParam.toString());
+
+                    os.flush();
+                    os.close();
+
+                    Log.i("STATUS", String.valueOf(conn.getResponseCode()));
+                    Log.i("MSG" , conn.getResponseMessage());
+
+                    conn.disconnect();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+        thread.start();
     }
 
     /** Updates display based on Ambient state. If you need to pull data, you should do it here. */
@@ -312,41 +315,21 @@ public class MainActivity extends FragmentActivity implements AmbientModeSupport
 
     }
 
-    @Override
-    public AmbientModeSupport.AmbientCallback getAmbientCallback() {
-        return new MyAmbientCallback();
-    }
+    private class Observation {
+        private long time_obs;
+        private int db_reading;
 
-    private class MyAmbientCallback extends AmbientModeSupport.AmbientCallback {
-        /** Prepares the UI for ambient mode. */
-        @Override
-        public void onEnterAmbient(Bundle ambientDetails) {
-            super.onEnterAmbient(ambientDetails);
-
-            refreshDisplayAndSetNextUpdate();
+        public Observation(long time_obs, int db_reading) {
+            this.time_obs = time_obs;
+            this.db_reading = db_reading;
         }
 
-        /**
-         * Updates the display in ambient mode on the standard interval. Since we're using a custom
-         * refresh cycle, this method does NOT update the data in the display. Rather, this method
-         * simply updates the positioning of the data in the screen to avoid burn-in, if the display
-         * requires it.
-         */
-        @Override
-        public void onUpdateAmbient() {
-            super.onUpdateAmbient();
-
+        public long getTimeObs() {
+            return time_obs;
         }
 
-        /** Restores the UI to active (non-ambient) mode. */
-        @Override
-        public void onExitAmbient() {
-            super.onExitAmbient();
-
-            /* Clears out Alarms since they are only used in ambient mode. */
-            mAmbientUpdateAlarmManager.cancel(mAmbientUpdatePendingIntent);
-
-            refreshDisplayAndSetNextUpdate();
+        public int getDbReading() {
+            return db_reading;
         }
     }
 

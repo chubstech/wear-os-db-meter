@@ -14,6 +14,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="#000000"
+        android:keepScreenOn="true"
         android:backgroundTint="#090808">
 
         <TextView
@@ -23,7 +24,7 @@
             android:gravity="center"
             android:text="0"
             android:textAppearance="@android:style/TextAppearance.Material.Body1"
-            android:textColor="#2CFFFFFF"
+            android:textColor="#59FFFFFF"
             android:textSize="144sp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
