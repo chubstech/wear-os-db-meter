@@ -1,10 +1,6 @@
 package com.example.dblevel;
 
-import android.app.AlarmManager;
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.media.MediaRecorder;
@@ -19,11 +15,9 @@ import java.time.Instant;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
-import android.view.WindowManager;
 import android.widget.TextView;
 
 import androidx.fragment.app.FragmentActivity;
-import androidx.wear.ambient.AmbientModeSupport;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -45,56 +39,26 @@ public class MainActivity extends FragmentActivity {
     /** Milliseconds between updates based on state. */
     private static final long ACTIVE_INTERVAL_MS = 50;
 
-    private static final long AMBIENT_INTERVAL_MS = 50;
-
     /** Action for updating the display in ambient mode, per our custom refresh cycle. */
     private static final String AMBIENT_UPDATE_ACTION = "com.example.android.wearable.wear.alwayson.action.AMBIENT_UPDATE";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-
-        /*
-         * Create a PendingIntent which we'll give to the AlarmManager to send ambient mode updates
-         * on an interval which we've define.
-         */
-
-        /*
-         * Retrieves a PendingIntent that will perform a broadcast. You could also use getActivity()
-         * to retrieve a PendingIntent that will start a new activity, but be aware that actually
-         * triggers onNewIntent() which causes lifecycle changes (onPause() and onResume()) which
-         * might trigger code to be re-executed more often than you want.
-         *
-         * If you do end up using getActivity(), also make sure you have set activity launchMode to
-         * singleInstance in the manifest.
-         *
-         * Otherwise, it is easy for the AlarmManager launch Intent to open a new activity
-         * every time the Alarm is triggered rather than reusing this Activity.
-         */
-
-
         setContentView(R.layout.activity_main);
         mStatusView = findViewById(R.id.dbText);
         mStatusAvgView = findViewById(R.id.time);
-//        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     public void onResume() {
         super.onResume();
         startRecorder();
-
-
-        IntentFilter filter = new IntentFilter(AMBIENT_UPDATE_ACTION);
-
         refreshDisplayAndSetNextUpdate();
     }
 
     public void onPause() {
         super.onPause();
         stopRecorder();
-
-
         mActiveModeUpdateHandler.removeMessages(MSG_UPDATE_SCREEN);
     }
 
@@ -182,14 +146,6 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
-
-
-
-
-
-
-
-
     /**
      * This custom handler is used for updates in "Active" mode. We use a separate static class to
      * help us avoid memory leaks.
@@ -205,7 +161,10 @@ public class MainActivity extends FragmentActivity {
     private long count = 0;
     ArrayList<Observation> obs = new ArrayList<>();
 
-    String user_id = "BBNN21";
+    String user_id = "Debug";
+//    String user_id = "Nurse1";
+//    String user_id = "Patient1";
+//    String user_id = "Dr1";
 
     private void refreshDisplayAndSetNextUpdate() {
 
@@ -213,11 +172,13 @@ public class MainActivity extends FragmentActivity {
 
         long timeMs = System.currentTimeMillis();
         long extraTime = 0;
+        boolean shouldReturn = false;
         if(lastReading > 75 && !vibrating) {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
                 v.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
                 extraTime = 1000;
                 vibrating = true;
+                shouldReturn = true;
         } else {
             if(count++ == 8) {
                 vibrating = false;
@@ -229,6 +190,8 @@ public class MainActivity extends FragmentActivity {
         long delayMs = ACTIVE_INTERVAL_MS - (timeMs % ACTIVE_INTERVAL_MS) + extraTime;
         mActiveModeUpdateHandler.removeMessages(MSG_UPDATE_SCREEN);
         mActiveModeUpdateHandler.sendEmptyMessageDelayed(MSG_UPDATE_SCREEN, delayMs);
+
+        if(shouldReturn) return;
 
         double amplitude = mRecorder.getMaxAmplitude();
         if(amplitude > 0 && amplitude < 1000000) {
